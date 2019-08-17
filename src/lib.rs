@@ -57,7 +57,7 @@ impl<R> Request<R>
 where
     R: Req,
 {
-    pub async fn reply(mut self, reply: R) -> Result<(), Error> {
+    pub async fn reply(mut self, reply: R::Rep) -> Result<(), Error> {
         let ret = Bytes::from(bincode::serialize(&reply).context(Bincode)?);
         self.framed.send(ret).await.context(SendReply)
     }
@@ -129,24 +129,27 @@ mod tests {
         #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
         struct Hi;
 
+        #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
+        struct Hello;
+
         impl Req for Hi {
-            type Rep = Hi;
+            type Rep = Hello;
         }
 
         let mut rt = current_thread::Runtime::new().unwrap();
 
         let path = "\0oneshot-test";
-        let srv = listen(path).unwrap();
+        let srv = listen::<Hi>(path).unwrap();
 
         rt.spawn(async move {
             futures::pin_mut!(srv);
             let req = srv.next().await.unwrap();
-            req.reply(Hi).await.unwrap();
+            req.reply(Hello).await.unwrap();
         });
 
         rt.spawn(async move {
             let resp = send_request(path, Hi).await.unwrap();
-            assert_eq!(resp, Hi)
+            assert_eq!(resp, Hello)
         });
 
         rt.run().unwrap();
