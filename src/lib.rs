@@ -1,7 +1,8 @@
+use std::fmt;
+
 use bytes::Bytes;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use snafu::{ResultExt, Snafu};
 use tokio::{
     codec::{Framed, LengthDelimitedCodec},
     net::unix::{UnixListener, UnixStream},
@@ -12,31 +13,53 @@ use tokio::{
 // TODO: make this work for not oneshots
 // TODO: maybe pass fd's over uds
 
-#[derive(Snafu, Debug)]
+#[derive(Debug)]
 pub enum Error {
-    #[snafu(display("Can't bind to {}: {}", path, source))]
     Bind {
         path: &'static str,
         source: std::io::Error,
     },
 
-    #[snafu(display("Can't connect to {}: {}", path, source))]
     Connect {
         path: &'static str,
         source: std::io::Error,
     },
 
-    #[snafu(display("Connection hung up before finishing req-rep"))]
     Hup,
 
-    #[snafu(display("Io error: {}", source))]
-    IntermittentIo { source: std::io::Error },
+    IntermittentIo(std::io::Error),
 
-    #[snafu(display("Reply"))]
-    SendReply { source: std::io::Error },
+    SendReply(std::io::Error),
 
-    #[snafu(display("Serializing/Deserializing using bincode failed"))]
-    Bincode { source: bincode::Error },
+    Bincode(bincode::Error),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Error::*;
+        match self {
+            Bind { source, path } => write!(f, "Can't bind to {}: {}", path, source),
+            Connect { source, path } => write!(f, "Can't connect to {}: {}", path, source),
+            Hup => f.write_str("Hung up before completing request"),
+            IntermittentIo(e) => write!(f, "IO error while reading req/rep: {}", e),
+            SendReply(e) => write!(f, "IO error while sending rep: {}", e),
+            Bincode(e) => write!(f, "Io while serializing/deserializing from bincode: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        use Error::*;
+        match self {
+            Bind { source, .. } => Some(source),
+            Connect { source, .. } => Some(source),
+            Hup => None,
+            IntermittentIo(e) => Some(e),
+            SendReply(e) => Some(e),
+            Bincode(e) => Some(e),
+        }
+    }
 }
 
 pub trait Req: Serialize + DeserializeOwned
@@ -57,8 +80,8 @@ where
     R: Req,
 {
     pub async fn reply(mut self, reply: R::Rep) -> Result<(), Error> {
-        let ret = Bytes::from(bincode::serialize(&reply).context(Bincode)?);
-        self.framed.send(ret).await.context(SendReply)
+        let ret = Bytes::from(bincode::serialize(&reply).map_err(Error::Bincode)?);
+        self.framed.send(ret).await.map_err(Error::SendReply)
     }
 
     pub fn kind(&self) -> &R {
@@ -75,9 +98,9 @@ where
         .next()
         .await
         .ok_or(Error::Hup)?
-        .context(IntermittentIo)?;
+        .map_err(Error::IntermittentIo)?;
 
-    let kind = bincode::deserialize(&buf).context(Bincode)?;
+    let kind = bincode::deserialize(&buf).map_err(Error::Bincode)?;
 
     Ok(Request { kind, framed })
 }
@@ -86,7 +109,7 @@ pub fn listen<R>(path: &'static str) -> Result<impl Stream<Item = Request<R>>, E
 where
     R: Req,
 {
-    let listener = UnixListener::bind(path).context(Bind { path })?;
+    let listener = UnixListener::bind(path).map_err(|e| Error::Bind { path, source: e })?;
 
     Ok(listener
         .incoming()
@@ -99,22 +122,24 @@ pub async fn send_request<R>(path: &'static str, req: R) -> Result<R::Rep, Error
 where
     R: Req,
 {
-    let stream = UnixStream::connect(path).await.context(Connect { path })?;
+    let stream = UnixStream::connect(path)
+        .await
+        .map_err(|e| Error::Connect { path, source: e })?;
     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
 
-    let buf = bincode::serialize(&req).context(Bincode)?;
+    let buf = bincode::serialize(&req).map_err(Error::Bincode)?;
     framed
         .send(Bytes::from(buf))
         .await
-        .context(IntermittentIo)?;
+        .map_err(Error::IntermittentIo)?;
 
     let buf = framed
         .next()
         .await
         .ok_or(Error::Hup)?
-        .context(IntermittentIo)?;
+        .map_err(Error::IntermittentIo)?;
 
-    bincode::deserialize(&buf).context(Bincode)
+    bincode::deserialize(&buf).map_err(Error::Bincode)
 }
 
 #[cfg(test)]

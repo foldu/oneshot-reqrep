@@ -12,4 +12,6 @@ futures-preview = { version = "=0.3.0-alpha.18", features = ["async-await", "nig
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 bytes = "0.4"
-snafu = "0.4.4"
+
+[dev-dependencies]
+tokio = { version = "=0.2.0-alpha.2", default-features = false, features = ["uds", "codec", "rt-full"] }
