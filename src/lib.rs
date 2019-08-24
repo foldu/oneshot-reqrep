@@ -1,4 +1,3 @@
-#![feature(async_await)]
 use bytes::Bytes;
 use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
