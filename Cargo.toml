@@ -7,11 +7,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "=0.2.0-alpha.3", default-features = false, features = ["uds", "codec"] }
+tokio = { version = "=0.2.0-alpha.4", default-features = false, features = ["uds", "codec"] }
 futures-preview = { version = "=0.3.0-alpha.18", features = ["async-await", "nightly"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 bytes = "0.4"
 
 [dev-dependencies]
-tokio = { version = "=0.2.0-alpha.3", default-features = false, features = ["uds", "codec", "rt-full"] }
+tokio = { version = "=0.2.0-alpha.4", default-features = false, features = ["uds", "codec", "rt-full"] }
