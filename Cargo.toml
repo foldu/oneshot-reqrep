@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 tokio = { version = "=0.2.0-alpha.4", default-features = false, features = ["uds", "codec"] }
-futures-preview = { version = "=0.3.0-alpha.18", features = ["async-await", "nightly"] }
 serde = { version = "1", features = ["derive"] }
 bincode = "1"
 bytes = "0.4"

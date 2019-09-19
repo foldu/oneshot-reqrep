@@ -1,7 +1,6 @@
 use std::fmt;
 
 use bytes::Bytes;
-use futures::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{
     codec::{Framed, LengthDelimitedCodec},
@@ -79,8 +78,8 @@ impl<R> Request<R>
 where
     R: Req,
 {
-    pub async fn reply(mut self, reply: R::Rep) -> Result<(), Error> {
-        let ret = Bytes::from(bincode::serialize(&reply).map_err(Error::Bincode)?);
+    pub async fn reply(mut self, reply: &R::Rep) -> Result<(), Error> {
+        let ret = Bytes::from(bincode::serialize(reply).map_err(Error::Bincode)?);
         self.framed.send(ret).await.map_err(Error::SendReply)
     }
 
@@ -168,7 +167,7 @@ mod tests {
         rt.spawn(async move {
             futures::pin_mut!(srv);
             let req = srv.next().await.unwrap();
-            req.reply(Hello).await.unwrap();
+            req.reply(&Hello).await.unwrap();
         });
 
         rt.spawn(async move {
