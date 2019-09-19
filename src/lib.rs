@@ -165,7 +165,7 @@ mod tests {
         let srv = listen::<Hi>(path).unwrap();
 
         rt.spawn(async move {
-            futures::pin_mut!(srv);
+            futures_util::pin_mut!(srv);
             let req = srv.next().await.unwrap();
             req.reply(&Hello).await.unwrap();
         });
