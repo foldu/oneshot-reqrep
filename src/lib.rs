@@ -30,7 +30,7 @@ pub enum Error {
 
     SendReply(std::io::Error),
 
-    Bincode(bincode::Error),
+    Cbor(serde_cbor::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -42,7 +42,7 @@ impl std::fmt::Display for Error {
             Hup => f.write_str("Hung up before completing request"),
             IntermittentIo(e) => write!(f, "IO error while reading req/rep: {}", e),
             SendReply(e) => write!(f, "IO error while sending rep: {}", e),
-            Bincode(e) => write!(f, "Io while serializing/deserializing from bincode: {}", e),
+            Cbor(e) => write!(f, "Io while serializing/deserializing from cbor: {}", e),
         }
     }
 }
@@ -56,7 +56,7 @@ impl std::error::Error for Error {
             Hup => None,
             IntermittentIo(e) => Some(e),
             SendReply(e) => Some(e),
-            Bincode(e) => Some(e),
+            Cbor(e) => Some(e),
         }
     }
 }
@@ -79,7 +79,7 @@ where
     R: Req,
 {
     pub async fn reply(mut self, reply: &R::Rep) -> Result<(), Error> {
-        let ret = Bytes::from(bincode::serialize(reply).map_err(Error::Bincode)?);
+        let ret = Bytes::from(serde_cbor::to_vec(reply).map_err(Error::Cbor)?);
         self.framed.send(ret).await.map_err(Error::SendReply)
     }
 
@@ -99,7 +99,7 @@ where
         .ok_or(Error::Hup)?
         .map_err(Error::IntermittentIo)?;
 
-    let kind = bincode::deserialize(&buf).map_err(Error::Bincode)?;
+    let kind = serde_cbor::from_slice(&buf).map_err(Error::Cbor)?;
 
     Ok(Request { kind, framed })
 }
@@ -126,7 +126,7 @@ where
         .map_err(|e| Error::Connect { path, source: e })?;
     let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
 
-    let buf = bincode::serialize(&req).map_err(Error::Bincode)?;
+    let buf = serde_cbor::to_vec(&req).map_err(Error::Cbor)?;
     framed
         .send(Bytes::from(buf))
         .await
@@ -138,7 +138,7 @@ where
         .ok_or(Error::Hup)?
         .map_err(Error::IntermittentIo)?;
 
-    bincode::deserialize(&buf).map_err(Error::Bincode)
+    serde_cbor::from_slice(&buf).map_err(Error::Cbor)
 }
 
 #[cfg(test)]
