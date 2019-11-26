@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 tokio = { version = "=0.2.0-alpha.6", default-features = false, features = ["uds", "codec"] }
 serde = { version = "1", features = ["derive"] }
-bytes = "0.4"
+bytes = "0.5"
 futures-util-preview = "0.3.0-alpha.18"
 serde_cbor = "0.10.1"
 
