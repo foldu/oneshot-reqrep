@@ -1,12 +1,16 @@
 use std::fmt;
 
 use bytes::Bytes;
+use futures_util::{
+    sink::SinkExt,
+    stream::{Stream, StreamExt},
+};
 use serde::{de::DeserializeOwned, Serialize};
 use tokio::{
-    codec::{Framed, LengthDelimitedCodec},
-    net::unix::{UnixListener, UnixStream},
-    prelude::*,
+    net::{UnixListener, UnixStream},
+    sync::mpsc,
 };
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 // TODO: dox
 // TODO: make this work for not oneshots
@@ -61,9 +65,9 @@ impl std::error::Error for Error {
     }
 }
 
-pub trait Req: Serialize + DeserializeOwned
+pub trait Req: Serialize + DeserializeOwned + Send
 where
-    Self::Rep: Serialize + DeserializeOwned,
+    Self::Rep: Serialize + DeserializeOwned + Send,
 {
     type Rep;
 }
@@ -104,17 +108,30 @@ where
     Ok(Request { kind, framed })
 }
 
-pub fn listen<R>(path: &'static str) -> Result<impl Stream<Item = Request<R>>, Error>
+pub fn listen<R>(
+    path: &'static str,
+    req_buffer: usize,
+) -> Result<impl Stream<Item = Request<R>>, Error>
 where
-    R: Req,
+    R: Req + 'static,
 {
-    let listener = UnixListener::bind(path).map_err(|e| Error::Bind { path, source: e })?;
+    let mut listener = UnixListener::bind(path).map_err(|e| Error::Bind { path, source: e })?;
+    let (mut tx, rx) = mpsc::channel(req_buffer);
 
-    Ok(listener
-        .incoming()
-        .filter_map(|conn| async { conn.ok() })
-        .map(read_request)
-        .filter_map(|cmd| async { cmd.await.ok() }))
+    tokio::task::spawn(async move {
+        let mut incoming = listener.incoming();
+        while let Some(cxn) = incoming.next().await {
+            if let Ok(cxn) = cxn {
+                if let Ok(req) = read_request::<R>(cxn).await {
+                    if let Err(_) = tx.send(req).await {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(rx)
 }
 
 pub async fn send_request<R>(path: &'static str, req: R) -> Result<R::Rep, Error>
@@ -145,10 +162,10 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn it_works() {
+    #[tokio::test]
+    async fn it_works() {
         use serde::Deserialize;
-        use tokio::runtime::current_thread;
+
         #[derive(Serialize, Deserialize, Debug, Eq, PartialEq)]
         struct Hi;
 
@@ -159,22 +176,17 @@ mod tests {
             type Rep = Hello;
         }
 
-        let mut rt = current_thread::Runtime::new().unwrap();
-
         let path = "\0oneshot-test";
-        let srv = listen::<Hi>(path).unwrap();
 
-        rt.spawn(async move {
+        let srv = listen::<Hi>(path, 1).unwrap();
+
+        tokio::task::spawn(async move {
             futures_util::pin_mut!(srv);
             let req = srv.next().await.unwrap();
             req.reply(&Hello).await.unwrap();
         });
 
-        rt.spawn(async move {
-            let resp = send_request(path, Hi).await.unwrap();
-            assert_eq!(resp, Hello)
-        });
-
-        rt.run().unwrap();
+        let resp = send_request(path, Hi).await.unwrap();
+        assert_eq!(resp, Hello);
     }
 }
